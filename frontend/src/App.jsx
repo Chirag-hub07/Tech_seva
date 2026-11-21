@@ -14,6 +14,7 @@ export default function App() {
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [patientError, setPatientError] = useState('')
   const [isDark, setIsDark] = useState(() => localStorage.getItem('exacerbalert-theme') === 'dark')
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('exacerbalert-sidebar') === 'collapsed')
 
   useEffect(() => {
     getPatients().then((data) => {
@@ -23,10 +24,11 @@ export default function App() {
   }, [])
 
   useEffect(() => { localStorage.setItem('exacerbalert-theme', isDark ? 'dark' : 'light') }, [isDark])
+  useEffect(() => { localStorage.setItem('exacerbalert-sidebar', isSidebarCollapsed ? 'collapsed' : 'expanded') }, [isSidebarCollapsed])
 
-  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark }
-  return <div className={`app-shell ${isDark ? 'theme-dark' : ''}`}>
-    <Sidebar />
+  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark, isSidebarCollapsed, setIsSidebarCollapsed }
+  return <div className={`app-shell ${isDark ? 'theme-dark' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
+    <Sidebar collapsed={isSidebarCollapsed} />
     <main className="main-content">
       <Topbar {...shared} />
       <Routes>
