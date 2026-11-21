@@ -13,10 +13,13 @@
     "lucide-react": "latest",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
-    "react-router-dom": "^7.1.1",
+    "react-router-dom": "^6.28.1",
     "recharts": "^2.15.0"
   },
   "devDependencies": {
     "vite": "^5.4.11"
+  },
+  "allowScripts": {
+    "esbuild@0.21.5": true
   }
 }
