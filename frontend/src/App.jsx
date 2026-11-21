@@ -13,6 +13,7 @@ export default function App() {
   const [patients, setPatients] = useState([])
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [patientError, setPatientError] = useState('')
+  const [isDark, setIsDark] = useState(() => localStorage.getItem('exacerbalert-theme') === 'dark')
 
   useEffect(() => {
     getPatients().then((data) => {
@@ -21,8 +22,10 @@ export default function App() {
     }).catch((error) => setPatientError(error.message))
   }, [])
 
-  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode }
-  return <div className="app-shell">
+  useEffect(() => { localStorage.setItem('exacerbalert-theme', isDark ? 'dark' : 'light') }, [isDark])
+
+  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark }
+  return <div className={`app-shell ${isDark ? 'theme-dark' : ''}`}>
     <Sidebar />
     <main className="main-content">
       <Topbar {...shared} />
