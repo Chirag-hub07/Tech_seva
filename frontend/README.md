@@ -13,6 +13,16 @@ npm run dev
 
 Set `VITE_API_BASE_URL` in `.env` to the FastAPI API prefix (defaults to `http://localhost:8000/api/v1`).
 
+### Demo mode
+
+To inspect every screen before FastAPI and PostgreSQL are ready, add this to `.env` and restart Vite:
+
+```env
+VITE_DEMO_MODE=true
+```
+
+Demo mode uses clearly labelled, fictional UI records only. It does not test a real database, device stream, or ML model. Set it back to `false` for FastAPI integration.
+
 ## Backend contract
 
 The UI expects JSON from these endpoints (array payloads may also be wrapped as `{ "items": [...] }` or `{ "data": [...] }`):

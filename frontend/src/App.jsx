@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Navigate, Route, Routes } from 'react-router-dom'
 import Sidebar from './components/Sidebar'
 import Topbar from './components/Topbar'
-import { getPatients } from './services/api'
+import { getPatients, isDemoMode } from './services/api'
 import Dashboard from './pages/Dashboard'
 import PatientDetails from './pages/PatientDetails'
 import SensorMonitoring from './pages/SensorMonitoring'
@@ -21,7 +21,7 @@ export default function App() {
     }).catch((error) => setPatientError(error.message))
   }, [])
 
-  const shared = { patients, selectedPatient, setSelectedPatient, patientError }
+  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode }
   return <div className="app-shell">
     <Sidebar />
     <main className="main-content">
