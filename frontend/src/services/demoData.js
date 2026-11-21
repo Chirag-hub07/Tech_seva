@@ -18,14 +18,15 @@ const sensorValues = {
   SQI: ['sleep_quality_score', [82, 80, 78, 76, 74, 77, 73]],
 }
 
-const measurementsFor = (patientId, type) => {
+const measurementsFor = (patientId, type, range = '7d') => {
   const [field, values] = sensorValues[type]
   const offset = patientId === 102 ? -1 : 0
-  return values.map((value, index) => ({ id: `${patientId}-${type}-${index}`, sensor_type: type, measured_at: at(6 - index), measurements: { [field]: value + offset }, is_valid: !(type === 'SII' && index === 2) }))
+  const days = Number.parseInt(range, 10) || 7
+  return Array.from({ length: days }, (_, index) => ({ id: `${patientId}-${type}-${index}`, sensor_type: type, measured_at: at(days - 1 - index), measurements: { [field]: values[index % values.length] + offset }, is_valid: !(type === 'SII' && index === 2) }))
 }
 
 export const demoLatestMeasurements = (patientId) => Object.keys(sensorValues).map((type) => measurementsFor(patientId, type).at(-1))
-export const demoMeasurements = (patientId, sensorType) => measurementsFor(patientId, sensorType)
+export const demoMeasurements = (patientId, sensorType, range) => measurementsFor(patientId, sensorType, range)
 export const demoLatestPrediction = (patientId) => ({ id: `prediction-${patientId}-latest`, patient_id: patientId, risk_probability: patientId === 101 ? 0.42 : 0.18, risk_level: patientId === 101 ? 'MEDIUM' : 'LOW', prediction_horizon_days: 7, prediction_timestamp: at(0), model_version: 'demo-ui-v1' })
 export const demoPredictionHistory = (patientId) => [
   { ...demoLatestPrediction(patientId), id: `prediction-${patientId}-1`, prediction_timestamp: at(0) },
