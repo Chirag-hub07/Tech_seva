@@ -1,0 +1,5 @@
+import { useEffect, useState } from 'react'
+import AlertCard from '../components/AlertCard'
+import EmptyState from '../components/EmptyState'
+import { acknowledgeAlert, getAlerts } from '../services/api'
+export default function Alerts({ selectedPatient }) { const [items, setItems] = useState([]); const [error, setError] = useState(''); const load = () => selectedPatient?.id && getAlerts(selectedPatient.id).then(setItems).catch((e) => setError(e.message)); useEffect(load, [selectedPatient?.id]); const ack = async (id) => { try { await acknowledgeAlert(id); load() } catch (e) { setError(e.message) } }; if (!selectedPatient) return <EmptyState />; return <div className="page"><p className="eyebrow">RISK NOTIFICATIONS</p><h2>Alerts</h2>{error ? <div className="notice">{error}</div> : null}<div className="alerts-list">{items.length ? items.map((a) => <AlertCard key={a.id} alert={a} onAcknowledge={ack} />) : <EmptyState title="No alerts" detail="There are no backend alerts for the selected patient." />}</div></div> }

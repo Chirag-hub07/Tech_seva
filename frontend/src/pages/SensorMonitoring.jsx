@@ -1,0 +1,6 @@
+import { useEffect, useState } from 'react'
+import SensorChart from '../components/SensorChart'
+import EmptyState from '../components/EmptyState'
+import { getMeasurements } from '../services/api'
+const sensors = ['BRI', 'EI', 'MI', 'PEI', 'PRVI', 'SHRI', 'SII', 'SQI']
+export default function SensorMonitoring({ selectedPatient }) { const [sensor, setSensor] = useState('BRI'), [data, setData] = useState([]), [error, setError] = useState(''); useEffect(() => { if (!selectedPatient?.id) return; getMeasurements(selectedPatient.id, sensor).then(setData).catch((e) => { setData([]); setError(e.message) }) }, [selectedPatient?.id, sensor]); if (!selectedPatient) return <EmptyState />; return <div className="page"><p className="eyebrow">HISTORICAL TELEMETRY</p><h2>Sensor monitoring</h2><div className="toolbar"><label>Sensor stream <select value={sensor} onChange={(e) => setSensor(e.target.value)}>{sensors.map((s) => <option key={s}>{s}</option>)}</select></label><span>Previous 7 days</span></div><section className="card chart-card"><h3>{sensor} trend</h3>{error ? <EmptyState title="Measurements unavailable" detail={error} /> : <SensorChart data={data} sensor={sensor} />}</section><p className="page-note">Measurement values and validity indicators are displayed exactly as returned by the backend.</p></div> }
