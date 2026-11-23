@@ -39,3 +39,9 @@ Thumbs.db
 # TOLIFE COPD healthcare dataset - never upload to GitHub
 data/raw/TOLIFE_COPD_Dataset/
 data/raw/*.zip
+ 
+ 
+# Notebook-generated and patient-level data 
+notebooks/data/ 
+.virtual_documents/ 
+.ipynb_checkpoints/ 
