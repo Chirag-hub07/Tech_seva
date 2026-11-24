@@ -13,6 +13,7 @@ import { acknowledgeAlert, getAlerts } from '../services/api'
 
 export default function Alerts({ selectedPatient }) {
   const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [filter, setFilter] = useState('all') // 'all' | 'pending' | 'acknowledged'
 
@@ -20,9 +21,17 @@ export default function Alerts({ selectedPatient }) {
 
   const load = () => {
     if (!selectedPatient?.id) return
+    setLoading(true)
+    setError('')
     getAlerts(selectedPatient.id)
-      .then(setItems)
-      .catch((requestError) => setError(requestError.message))
+      .then((data) => {
+        setItems(data)
+        setLoading(false)
+      })
+      .catch((requestError) => {
+        setError(requestError.message)
+        setLoading(false)
+      })
   }
 
   useEffect(() => {
@@ -72,11 +81,11 @@ export default function Alerts({ selectedPatient }) {
         <div className="page-header-actions">
           <div className="alert-kpi-pill pending">
             <span className="kpi-dot red" />
-            <span>{pendingCount} Pending Triage</span>
+            <span>{loading ? '...' : `${pendingCount} Pending Triage`}</span>
           </div>
           <div className="alert-kpi-pill resolved">
             <span className="kpi-dot green" />
-            <span>{ackCount} Acknowledged</span>
+            <span>{loading ? '...' : `${ackCount} Acknowledged`}</span>
           </div>
         </div>
       </div>
@@ -89,21 +98,21 @@ export default function Alerts({ selectedPatient }) {
             className={filter === 'all' ? 'active' : ''}
             onClick={() => setFilter('all')}
           >
-            All Alerts ({items.length})
+            All Alerts ({loading ? '...' : items.length})
           </button>
           <button
             type="button"
             className={filter === 'pending' ? 'active' : ''}
             onClick={() => setFilter('pending')}
           >
-            Pending Review ({pendingCount})
+            Pending Review ({loading ? '...' : pendingCount})
           </button>
           <button
             type="button"
             className={filter === 'acknowledged' ? 'active' : ''}
             onClick={() => setFilter('acknowledged')}
           >
-            Acknowledged ({ackCount})
+            Acknowledged ({loading ? '...' : ackCount})
           </button>
         </div>
       </div>
@@ -112,7 +121,12 @@ export default function Alerts({ selectedPatient }) {
 
       {/* Alert Feed List */}
       <div className="alerts-list">
-        {filteredItems.length ? (
+        {loading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+            <div className="card skeleton-block" style={{ height: '82px', borderRadius: '12px' }} />
+            <div className="card skeleton-block" style={{ height: '82px', borderRadius: '12px' }} />
+          </div>
+        ) : filteredItems.length ? (
           filteredItems.map((alert) => (
             <AlertCard key={alert.id} alert={alert} onAcknowledge={ack} />
           ))

@@ -14,15 +14,23 @@ import { getPredictionHistory } from '../services/api'
 
 export default function Predictions({ selectedPatient }) {
   const [items, setItems] = useState([])
+  const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
   const patientId = selectedPatient?.participant_id || selectedPatient?.patient_id || `DEMO-00${selectedPatient?.id || 1}`
 
   useEffect(() => {
     if (selectedPatient?.id) {
+      setLoading(true)
       getPredictionHistory(selectedPatient.id)
-        .then(setItems)
-        .catch((e) => setError(e.message))
+        .then((data) => {
+          setItems(data)
+          setLoading(false)
+        })
+        .catch((e) => {
+          setError(e.message)
+          setLoading(false)
+        })
     }
   }, [selectedPatient?.id])
 
@@ -97,6 +105,8 @@ export default function Predictions({ selectedPatient }) {
       {/* Table Section */}
       {error ? (
         <EmptyState title="Prediction history unavailable" detail={error} />
+      ) : loading ? (
+        <div className="card skeleton-block" style={{ height: '220px', borderRadius: '12px' }} />
       ) : items.length ? (
         <div className="table-wrap card">
           <table>

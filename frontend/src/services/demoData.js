@@ -35,8 +35,46 @@ export const demoPredictionHistory = (patientId) => [
 ]
 
 let demoAlerts = [
-  { id: 'demo-alert-1', patient_id: 101, alert_level: 'MEDIUM', message: 'Demo alert: a follow-up assessment may be appropriate.', status: 'pending', created_at: at(0) },
-  { id: 'demo-alert-2', patient_id: 101, alert_level: 'LOW', message: 'Demo alert: monitoring trend recorded.', status: 'acknowledged', created_at: at(3) },
+  {
+    id: 'demo-alert-1',
+    patient_id: 101,
+    alert_level: 'MEDIUM',
+    message: 'Respiration elevation detected: breathing rate trend increased (+1.8 bpm) over 48h baseline.',
+    status: 'pending',
+    created_at: at(0),
+  },
+  {
+    id: 'demo-alert-2',
+    patient_id: 101,
+    alert_level: 'LOW',
+    message: 'Nocturnal cough frequency (SII) variation logged by acoustic telemetry sensor.',
+    status: 'acknowledged',
+    created_at: at(3),
+  },
+  {
+    id: 'demo-alert-3',
+    patient_id: 102,
+    alert_level: 'HIGH',
+    message: 'Acute SpO2 nocturnal dip detected (91%). Clinical triage & bronchodilator review advised.',
+    status: 'pending',
+    created_at: at(0),
+  },
+  {
+    id: 'demo-alert-4',
+    patient_id: 102,
+    alert_level: 'MEDIUM',
+    message: 'Sleeping heart rate (SHRI) elevated above baseline by +6 bpm during nocturnal rest.',
+    status: 'pending',
+    created_at: at(1),
+  },
+  {
+    id: 'demo-alert-5',
+    patient_id: 102,
+    alert_level: 'LOW',
+    message: 'Daily mobility index (MI) recorded below baseline for 2 consecutive observation windows.',
+    status: 'acknowledged',
+    created_at: at(3),
+  },
 ]
 export const getDemoAlerts = (patientId) => demoAlerts.filter((alert) => alert.patient_id === patientId).map((alert) => ({ ...alert }))
 export const acknowledgeDemoAlert = (id) => {

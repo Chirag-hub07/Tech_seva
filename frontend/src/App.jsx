@@ -23,9 +23,18 @@ function ProtectedApp() {
     if (!user) return
     getPatients().then((data) => {
       setPatients(data)
-      setSelectedPatient(data[0] ?? null)
+      const savedId = localStorage.getItem('exacerbalert-selected-patient')
+      const matched = savedId ? data.find((p) => String(p.id) === savedId) : null
+      setSelectedPatient(matched || data[0] || null)
     }).catch((error) => setPatientError(error.message))
   }, [user])
+
+  const handleSelectPatient = (patient) => {
+    setSelectedPatient(patient)
+    if (patient?.id) {
+      localStorage.setItem('exacerbalert-selected-patient', String(patient.id))
+    }
+  }
 
   useEffect(() => { localStorage.setItem('exacerbalert-theme', isDark ? 'dark' : 'light') }, [isDark])
   useEffect(() => { localStorage.setItem('exacerbalert-sidebar', isSidebarCollapsed ? 'collapsed' : 'expanded') }, [isSidebarCollapsed])
@@ -34,7 +43,19 @@ function ProtectedApp() {
   if (passwordRecovery) return <Login />
   if (!user) return <Login />
 
-  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark, isSidebarCollapsed, setIsSidebarCollapsed, user, signOut }
+  const shared = {
+    patients,
+    selectedPatient,
+    setSelectedPatient: handleSelectPatient,
+    patientError,
+    isDemoMode,
+    isDark,
+    setIsDark,
+    isSidebarCollapsed,
+    setIsSidebarCollapsed,
+    user,
+    signOut,
+  }
   return <div className={`app-shell ${isDark ? 'theme-dark' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <Sidebar collapsed={isSidebarCollapsed} />
     <main className="main-content">
