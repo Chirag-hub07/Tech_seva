@@ -1,0 +1,20 @@
+# Environment files and credentials (CRITICAL: Never commit credentials)
+.env
+.env.*
+!.env.example
+
+# Python cache & bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Testing and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
