@@ -8,8 +8,11 @@ import PatientDetails from './pages/PatientDetails'
 import SensorMonitoring from './pages/SensorMonitoring'
 import Predictions from './pages/Predictions'
 import Alerts from './pages/Alerts'
+import Login from './pages/Login'
+import { AuthProvider, useAuth } from './auth/AuthContext'
 
-export default function App() {
+function ProtectedApp() {
+  const { user, loading, passwordRecovery, signOut } = useAuth()
   const [patients, setPatients] = useState([])
   const [selectedPatient, setSelectedPatient] = useState(null)
   const [patientError, setPatientError] = useState('')
@@ -17,16 +20,21 @@ export default function App() {
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(() => localStorage.getItem('exacerbalert-sidebar') === 'collapsed')
 
   useEffect(() => {
+    if (!user) return
     getPatients().then((data) => {
       setPatients(data)
       setSelectedPatient(data[0] ?? null)
     }).catch((error) => setPatientError(error.message))
-  }, [])
+  }, [user])
 
   useEffect(() => { localStorage.setItem('exacerbalert-theme', isDark ? 'dark' : 'light') }, [isDark])
   useEffect(() => { localStorage.setItem('exacerbalert-sidebar', isSidebarCollapsed ? 'collapsed' : 'expanded') }, [isSidebarCollapsed])
 
-  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark, isSidebarCollapsed, setIsSidebarCollapsed }
+  if (loading) return <div className="auth-loading"><span />Loading secure workspace...</div>
+  if (passwordRecovery) return <Login />
+  if (!user) return <Login />
+
+  const shared = { patients, selectedPatient, setSelectedPatient, patientError, isDemoMode, isDark, setIsDark, isSidebarCollapsed, setIsSidebarCollapsed, user, signOut }
   return <div className={`app-shell ${isDark ? 'theme-dark' : ''} ${isSidebarCollapsed ? 'sidebar-collapsed' : ''}`}>
     <Sidebar collapsed={isSidebarCollapsed} />
     <main className="main-content">
@@ -41,4 +49,8 @@ export default function App() {
       </Routes>
     </main>
   </div>
+}
+
+export default function App() {
+  return <AuthProvider><ProtectedApp /></AuthProvider>
 }

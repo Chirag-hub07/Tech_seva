@@ -13,6 +13,21 @@ npm run dev
 
 Set `VITE_API_BASE_URL` in `.env` to the FastAPI API prefix (defaults to `http://localhost:8000/api/v1`).
 
+## Authentication
+
+The application is protected by Supabase email/password authentication.
+
+1. Create a Supabase project.
+2. Enable Email/Password authentication.
+3. Copy `.env.example` to `.env` and set:
+   - `VITE_SUPABASE_URL`
+   - `VITE_SUPABASE_ANON_KEY`
+4. Restart Vite.
+
+Use only the Supabase publishable/anonymous client key in the frontend. Never place a Supabase service-role key in `VITE_*` variables.
+
+In demo mode, when Supabase is not configured, a session-only demo login is available. Use any valid email and a password of at least 6 characters. Demo authentication is for interface testing only.
+
 ### Demo mode
 
 To inspect every screen before FastAPI and PostgreSQL are ready, add this to `.env` and restart Vite:
