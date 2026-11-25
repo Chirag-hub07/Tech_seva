@@ -45,3 +45,14 @@ data/raw/*.zip
 notebooks/data/ 
 .virtual_documents/ 
 .ipynb_checkpoints/ 
+
+# ML experiment outputs and generated reports
+ml/outputs/
+ml/**/__pycache__/
+ml/**/*.pyc
+
+# Local backups and temporary files
+ml_backup_before_v2/
+ml_backup_before_v4/
+check_data_output.txt
+Untitled.ipynb

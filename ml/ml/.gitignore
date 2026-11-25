@@ -1,0 +1,6 @@
+# Generated artifacts may contain participant-level information
+# (e.g. fold assignments with participant IDs). Never commit them.
+outputs/
+*.joblib
+*.pkl
+__pycache__/
