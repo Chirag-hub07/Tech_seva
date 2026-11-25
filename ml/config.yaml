@@ -1,0 +1,201 @@
+# ExacerbAlert ML configuration.
+# Research prototype only - not a clinically validated prediction system.
+# All relative paths are resolved against the project root (the parent of ml/).
+
+paths:
+  features: data/processed/features/final_feature_dataset.parquet
+  labels: data/processed/labels/exacerbation_labels_7d.parquet
+  feature_dictionary: data/processed/incoming/feature_dictionary.csv
+  # Optional. Original TOLIFE event files (exacerbations.csv per participant).
+  # Used for the event-file diagnostics and, when post_event.event_source is
+  # "raw", for the complete event list. Never committed to Git.
+  raw_event_index_dir: data/raw/TOLIFE_COPD_Dataset/index
+  # Generated artifacts (fold assignments contain participant IDs). Git-ignored.
+  outputs: ml/outputs
+
+columns:
+  participant_id: Participant_ID
+  date: Date
+  original_target: exacerbation_within_7d
+  label_status: label_status
+  matched_event_date: matched_event_date
+  matched_event_severity: matched_event_severity
+  # Columns of the raw TOLIFE exacerbations.csv files.
+  raw_event_participant: Kit-id
+  raw_event_date: Date
+  raw_event_severity: Type
+
+# Columns that may never be used as predictors. Enforced in code.
+never_predictors:
+  - Participant_ID
+  - Date
+  - exacerbation_within_7d
+  - label_status
+  - matched_event_date
+  - matched_event_severity
+  - target
+  - target_status
+  - fold
+# Any column whose name matches one of these patterns is also rejected.
+never_predictor_patterns:
+  - "(?i)participant|patient|kit[-_ ]?id|subject[-_ ]?id"
+  - "(?i)^date$|event_date|matched_|label_status|exacerbat|severity|^target|^fold"
+
+target:
+  horizon_days: 7
+  positive_severities: [Moderate, Severe]
+  # "tolife_v1_absent_file_negative": per the TOLIFE V1.0 README,
+  #   exacerbations.csv exists only for participants with recorded events, so an
+  #   absent file means no exacerbations were recorded. Rows of those
+  #   participants become negative (0) only when the full horizon window
+  #   (Date, Date + 7 days] lies within their available feature follow-up;
+  #   otherwise they stay unknown (NaN).
+  # "original": use exacerbation_within_7d exactly as produced by notebook 06.
+  label_policy: original
+
+prediction_time:
+  # Predictions for day d are made at the END of day d, after day-d sensor data
+  # are complete. Features may use data up to and including day d; the target
+  # window is (d, d + horizon_days]. Features that would require data after
+  # the prediction time are forbidden.
+  assumption: end_of_day
+  # Feature-dictionary Time_Window values matching these patterns are rejected.
+  forbidden_time_window_patterns:
+    - "(?i)next|future|following|subsequent|ahead|forward"
+
+post_event:
+  # Primary analysis: exclude rows dated on the day of, or within this many days
+  # after, a documented event of the same participant (patient already
+  # exacerbating or recovering). null disables the exclusion.
+  primary_washout_days: 14
+  # Sensitivity analyses: null = no exclusion.
+  sensitivity_washout_days: [null, 28]
+  # "labels": events referenced by matched_event_date (lower bound - events not
+  #           reachable by any feature row are missing).
+  # "raw":    all events from the raw exacerbations.csv files.
+  event_source: raw
+
+feature_filters:
+  # Applied inside each training fold only.
+  max_train_missing_fraction: 0.95
+  drop_constant: true
+  drop_exact_duplicates: true
+
+feature_sets:
+  # All dictionary-documented predictors (after leakage guards).
+  all: {}
+  # Pre-specified smaller set chosen by feature family (not by outcome data).
+  compact:
+    include_groups: [daily]
+    include_patterns:
+      - "(?i)_rolling_7d_"
+      - "(?i)_baseline_(standardized_)?deviation$"
+      - "(?i)_availability$"
+      - "(?i)_coverage_percentage_7d$"
+  # Same as compact, without provisional time-in-study proxy features.
+  compact_no_time_proxies:
+    base: compact
+    exclude_patterns:
+      - "(?i)_baseline_count$"
+
+# Provisional list of features that may act as time-in-study proxies.
+time_in_study_proxy_patterns:
+  - "(?i)_baseline_count$"
+
+splits:
+  # Participant-grouped, participant-stratified K-fold, repeated with several
+  # seeds. Rows are never split randomly across training and validation.
+  outer_n_splits: 5
+  outer_seeds: [42, 43, 44, 45, 46]
+  inner_n_splits: 3
+  inner_seed: 2024
+  min_positive_participants_per_test_fold: 1
+
+# ---------------------------------------------------------------------------
+# Conservative feature exclusions (applied BEFORE any fold is fitted).
+# Unresolved feature groups are EXCLUDED by default; every decision is written
+# to the feature register in the run's output folder.
+# ---------------------------------------------------------------------------
+feature_exclusions:
+  # Real-data runs refuse to start without the two audit inputs below.
+  require_feature_audit: true
+  require_temporal_verification: true
+  # Output folder of `python ml/audit_features.py` run under the PRIMARY label
+  # policy (its summary must report label_policy=original).
+  feature_audit_dir: ~/exacerbalert_tools/feature_audit_original
+  # CSV of `python ml/verify_temporal.py --all`. Rolling/baseline features are
+  # kept only if their status is PASS there; anything else (including features
+  # never checked) is excluded.
+  temporal_verification_csv: ~/exacerbalert_tools/temporal_check_all/temporal_verification.csv
+  # Audit review reasons that exclude a feature from the primary model.
+  exclude_audit_review_reasons:
+    - high_target_correlation_check_for_leakage
+    - possible_calendar_or_time_name
+    - possible_event_or_outcome_name
+    - time_in_study_proxy_name
+    - high_correlation_with_days_in_study
+  # Name patterns excluded regardless of audit results.
+  calendar_name_patterns:
+    - "(?i)days_since|day_of|week|month|year|calendar|elapsed|study_day"
+  exclude_time_in_study_proxies: true      # uses time_in_study_proxy_patterns
+  # Explicit exclusions: feature name -> reason.
+  explicit:
+    EI_AQI_min_rolling_3d_std: pending rolling-std diagnosis (verify_temporal MISMATCH)
+    EI_AQI_min_rolling_7d_std: pending rolling-std diagnosis (verify_temporal MISMATCH)
+    EI_Lux_mean_rolling_7d_std: pending rolling-std diagnosis (verify_temporal MISMATCH)
+    SII_min_rolling_7d_std: pending rolling-std diagnosis (verify_temporal MISMATCH)
+  # Features re-admitted after documented review: feature name -> reason.
+  # Overrides every exclusion above except banned names. Empty by default.
+  cleared_after_review:
+    EI_Lux_mean_rolling_3d_std: >-
+      Diagnostic: BACKWARD_NUMERICAL_NOISE (diagnose_rolling_std.py).
+      Agreement with previous-days calculation: 0.992.
+      Agreement with includes-current-day calculation: 0.231.
+      Maximum numerical difference: 1.76e-7.
+      Reason: historical-only feature; tiny floating-point differences
+      (notebook 04 cell 125: shift(1).rolling("3D").std(), days d-3..d-1, current day excluded).
+
+# ---------------------------------------------------------------------------
+# Models. Class weighting is applied inside each training fold only.
+# Small grids: tuned on inner participant-grouped folds of the training data.
+# ---------------------------------------------------------------------------
+models:
+  dummy_prior: {enabled: true}
+  logistic_regression:
+    enabled: true
+    grid: {C: [0.01, 0.1, 1.0], l1_ratio: [0.5]}
+    fixed: {solver: saga, max_iter: 5000, class_weight: balanced}
+  random_forest:
+    enabled: true
+    grid: {min_samples_leaf: [10, 30]}
+    fixed: {n_estimators: 300, max_features: sqrt, class_weight: balanced_subsample, n_jobs: -1}
+  hist_gradient_boosting:
+    enabled: true
+    grid: {max_depth: [2, 3]}
+    fixed: {learning_rate: 0.05, max_iter: 200, l2_regularization: 1.0, class_weight: balanced}
+
+training:
+  random_seed: 2024
+  # Inner-fold metric used to choose hyper-parameters (never the outer test fold).
+  tuning_metric: average_precision
+  # Threshold chosen on inner out-of-fold predictions of the training participants.
+  threshold_strategy: target_sensitivity     # or: max_f1
+  target_sensitivity: 0.80
+  feature_set: all                            # see feature_sets
+  outputs_subdir: runs                        # under paths.outputs (git-ignored)
+
+evaluation:
+  bootstrap_resamples: 200                    # participant-level bootstrap for CIs
+  calibration_bins: 10
+  event_window_days: 7                        # an event counts as detected if any of the
+                                              # 7 preceding prediction days raised an alert
+
+# Optional held-out test participants. DISABLED: the configured design is
+# repeated participant-grouped cross-validation only, so results carry no
+# independent final test set. Enable only after checking the participant-level
+# positive/event distribution.
+holdout:
+  enabled: false
+  test_fraction: 0.2
+  min_positive_participants: 4
+  seed: 7
