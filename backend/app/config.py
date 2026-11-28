@@ -42,6 +42,56 @@ class Settings(BaseSettings):
     DB_POOL_SIZE: int = Field(default=5, description="SQLAlchemy pool size")
     DB_MAX_OVERFLOW: int = Field(default=10, description="SQLAlchemy pool max overflow")
 
+    # Supabase Authentication & Role-Based Access Control
+    SUPABASE_URL: str = Field(
+        default="https://odurqfhahaihiplienmz.supabase.co",
+        description="Supabase project URL",
+    )
+    SUPABASE_JWKS_URL: Optional[str] = Field(
+        default=None,
+        description="Explicit JWKS endpoint URL; defaults to {SUPABASE_URL}/auth/v1/.well-known/jwks.json",
+    )
+    SUPABASE_JWT_AUDIENCE: str = Field(
+        default="authenticated",
+        description="Expected JWT audience claim for Supabase Auth",
+    )
+    SUPABASE_JWT_ISSUER: Optional[str] = Field(
+        default=None,
+        description="Expected JWT issuer claim; defaults to {SUPABASE_URL}/auth/v1",
+    )
+    AUTH_ENABLED: bool = Field(
+        default=True,
+        description="Enforce JWT authentication and RBAC on protected endpoints",
+    )
+    AUTH_ALGORITHMS: List[str] = Field(
+        default=["ES256", "RS256"],
+        description="Supported asymmetric JWT signing algorithms",
+    )
+    JWKS_CACHE_TTL_SECONDS: int = Field(
+        default=3600,
+        description="JWKS signing key cache TTL in seconds",
+    )
+    MAX_JWT_LIFETIME_SECONDS: int = Field(
+        default=3600,
+        description="Maximum allowed token lifespan in seconds (exp - iat)",
+    )
+
+    @property
+    def effective_jwks_url(self) -> str:
+        """Resolve effective JWKS endpoint URL."""
+        if self.SUPABASE_JWKS_URL:
+            return self.SUPABASE_JWKS_URL
+        base = self.SUPABASE_URL.rstrip("/")
+        return f"{base}/auth/v1/.well-known/jwks.json"
+
+    @property
+    def effective_jwt_issuer(self) -> str:
+        """Resolve expected JWT issuer claim."""
+        if self.SUPABASE_JWT_ISSUER:
+            return self.SUPABASE_JWT_ISSUER
+        base = self.SUPABASE_URL.rstrip("/")
+        return f"{base}/auth/v1"
+
     @field_validator("CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, value: Union[str, List[str]]) -> List[str]:

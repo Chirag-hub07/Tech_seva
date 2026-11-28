@@ -60,11 +60,12 @@ def register_exception_handlers(app: FastAPI) -> None:
         logger.warning(f"HTTPException {exc.status_code} on {request.method} {request.url.path}: {exc.detail}")
         return JSONResponse(
             status_code=exc.status_code,
+            headers=getattr(exc, "headers", None),
             content={
                 "error": {
-                    "code": f"HTTP_{exc.status_code}",
-                    "message": exc.detail if isinstance(exc.detail, str) else "HTTP request error",
-                    "details": exc.detail if not isinstance(exc.detail, str) else None,
+                    "code": exc.detail.get("code") if isinstance(exc.detail, dict) and "code" in exc.detail else f"HTTP_{exc.status_code}",
+                    "message": exc.detail.get("message") if isinstance(exc.detail, dict) and "message" in exc.detail else (exc.detail if isinstance(exc.detail, str) else "HTTP request error"),
+                    "details": exc.detail if not isinstance(exc.detail, str) and not (isinstance(exc.detail, dict) and "message" in exc.detail) else None,
                 }
             },
         )
