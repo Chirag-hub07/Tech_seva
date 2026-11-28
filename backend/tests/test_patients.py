@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.database import Base, get_db
 from backend.app.main import app
-from backend.app.models import Patient
+from backend.app.models import ClinicianPatientAssignment, Patient
 
 
 @pytest.fixture
@@ -30,6 +30,16 @@ def mock_db_session():
     p2 = Patient(id=2, participant_id="TEST-002", country="SPAIN", created_at=now)
     p3 = Patient(id=3, participant_id="TEST-003", country="GERMANY", created_at=now)
     session.add_all([p1, p2, p3])
+
+    # Seed active assignments for default client clinician (including 9999 for 404 test)
+    for pid in (1, 2, 3, 9999):
+        session.add(
+            ClinicianPatientAssignment(
+                clinician_id="550e8400-e29b-41d4-a716-446655440001",
+                patient_id=pid,
+                assigned_by="550e8400-e29b-41d4-a716-446655440002",
+            )
+        )
     session.commit()
 
     try:

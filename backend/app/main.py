@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
 
-from backend.app.api.routes import alerts, health, measurements, patients, predictions
+from backend.app.api.routes import admin, alerts, auth, health, measurements, patients, predictions
 from backend.app.config import settings
 from backend.app.core.exceptions import register_exception_handlers
 from backend.app.database import verify_database
@@ -71,6 +71,8 @@ app.include_router(health.router)
 app.include_router(health.router, prefix=settings.API_V1_PREFIX)
 
 # 3. Read-only REST resources under /api/v1
+app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 app.include_router(patients.router, prefix=settings.API_V1_PREFIX)
 app.include_router(predictions.router, prefix=settings.API_V1_PREFIX)
 app.include_router(measurements.router, prefix=settings.API_V1_PREFIX)

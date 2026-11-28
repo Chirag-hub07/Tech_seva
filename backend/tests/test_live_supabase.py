@@ -6,24 +6,37 @@ SAFETY GUARANTEES:
 - Skips gracefully if DATABASE_URL is unconfigured.
 """
 
+import os
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.app.config import Settings
 from backend.app.database import verify_database
 from backend.app.main import app
+from backend.tests.conftest import make_jwt
 
 settings = Settings()
 is_db_configured = bool(settings.DATABASE_URL)
+run_live_opt_in = os.environ.get("RUN_LIVE_SUPABASE_TESTS") == "1"
+should_run_live_tests = is_db_configured and run_live_opt_in
 
 
-@pytest.mark.skipif(not is_db_configured, reason="Supabase database credentials not configured")
+@pytest.mark.skipif(
+    not should_run_live_tests,
+    reason="Live Supabase tests require DATABASE_URL and RUN_LIVE_SUPABASE_TESTS=1",
+)
 class TestLiveSupabaseReadOnly:
     """Read-only live database integration test suite."""
 
     @pytest.fixture(autouse=True)
     def setup_client(self):
-        with TestClient(app) as client:
+        live_token = make_jwt(
+            sub="550e8400-e29b-41d4-a716-446655440074",
+            email="live.clinician@exacerbalert.org",
+            role="clinician",
+            patient_ids=[str(i) for i in range(1, 100)] + ["99999"],
+        )
+        with TestClient(app, headers={"Authorization": f"Bearer {live_token}"}) as client:
             self.client = client
 
     def test_live_database_connection_status(self):

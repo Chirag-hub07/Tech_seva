@@ -7,8 +7,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.routes.patients import get_patient_or_404
+from backend.app.core.auth import get_current_user, verify_patient_access
 from backend.app.database import get_db
 from backend.app.models import SensorMeasurement
+from backend.app.schemas.auth import AuthenticatedUser
 from backend.app.schemas.measurement import (
     LatestMeasurementsResponse,
     MeasurementListResponse,
@@ -32,6 +34,7 @@ router = APIRouter(prefix="/patients", tags=["Sensor Telemetry"])
 )
 def get_latest_measurements(
     patient_id: int,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> LatestMeasurementsResponse:
     """Retrieve latest measurement snapshot per sensor type."""
@@ -41,7 +44,10 @@ def get_latest_measurements(
             detail="Database connection is not available.",
         )
 
-    # 1. Verify patient exists (raises 404 if missing)
+    # 1. Verify patient authorization with authoritative database session
+    verify_patient_access(patient_id, current_user, db=db)
+
+    # 2. Verify patient exists (raises 404 if missing)
     get_patient_or_404(patient_id, db)
 
     # 2. Query newest record per sensor_type
@@ -107,6 +113,7 @@ def get_measurements_series(
     range: TimeRange = Query(TimeRange.SEVEN_DAYS, description="Time window: 7d, 14d, 30d, 60d, 90d, all"),
     limit: int = Query(500, ge=1, le=1000, description="Maximum measurement rows to return"),
     offset: int = Query(0, ge=0, description="Offset for pagination"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> MeasurementListResponse:
     """Retrieve chronological measurements for a patient and sensor."""
@@ -116,7 +123,10 @@ def get_measurements_series(
             detail="Database connection is not available.",
         )
 
-    # 1. Verify patient exists (raises 404 if missing)
+    # 1. Verify patient authorization with authoritative database session
+    verify_patient_access(patient_id, current_user, db=db)
+
+    # 2. Verify patient exists (raises 404 if missing)
     get_patient_or_404(patient_id, db)
 
     # 2. Determine time window

@@ -9,7 +9,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend.app.database import Base, get_db
 from backend.app.main import app
-from backend.app.models import Patient, Prediction
+from backend.app.models import ClinicianPatientAssignment, Patient, Prediction
 
 
 @pytest.fixture
@@ -30,6 +30,15 @@ def mock_db_session():
     # Patient 2 has NO predictions
     p2 = Patient(id=2, participant_id="GER-002", country="GERMANY", created_at=now)
     session.add_all([p1, p2])
+
+    for pid in (1, 2, 999):
+        session.add(
+            ClinicianPatientAssignment(
+                clinician_id="550e8400-e29b-41d4-a716-446655440001",
+                patient_id=pid,
+                assigned_by="550e8400-e29b-41d4-a716-446655440002",
+            )
+        )
     session.commit()
 
     pred_old = Prediction(

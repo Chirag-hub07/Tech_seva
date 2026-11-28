@@ -6,8 +6,10 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.app.api.routes.patients import get_patient_or_404
+from backend.app.core.auth import get_current_user, verify_patient_access
 from backend.app.database import get_db
 from backend.app.models import Prediction
+from backend.app.schemas.auth import AuthenticatedUser
 from backend.app.schemas.prediction import PredictionHistoryResponse, PredictionResponse
 
 router = APIRouter(prefix="/patients", tags=["Predictions"])
@@ -26,6 +28,7 @@ router = APIRouter(prefix="/patients", tags=["Predictions"])
 )
 def get_latest_prediction(
     patient_id: int,
+    current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> Optional[PredictionResponse]:
     """Retrieve the newest risk prediction for the patient."""
@@ -35,7 +38,10 @@ def get_latest_prediction(
             detail="Database connection is not available.",
         )
 
-    # 1. Verify patient exists (raises 404 if missing)
+    # 1. Verify patient authorization with authoritative database session
+    verify_patient_access(patient_id, current_user, db=db)
+
+    # 2. Verify patient exists (raises 404 if missing)
     get_patient_or_404(patient_id, db)
 
     # 2. Query newest prediction using prediction_timestamp and ID tie-breaker
@@ -64,6 +70,7 @@ def get_prediction_history(
     patient_id: int,
     limit: int = Query(50, ge=1, le=200, description="Page limit"),
     offset: int = Query(0, ge=0, description="Page offset"),
+    current_user: AuthenticatedUser = Depends(get_current_user),
     db: Session = Depends(get_db),
 ) -> PredictionHistoryResponse:
     """Retrieve prediction history for a patient."""
@@ -73,7 +80,10 @@ def get_prediction_history(
             detail="Database connection is not available.",
         )
 
-    # Verify patient exists
+    # 1. Verify patient authorization with authoritative database session
+    verify_patient_access(patient_id, current_user, db=db)
+
+    # 2. Verify patient exists
     get_patient_or_404(patient_id, db)
 
     base_query = (

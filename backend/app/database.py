@@ -43,6 +43,7 @@ def get_engine() -> Optional[Engine]:
 
     connect_args: Dict[str, Any] = {
         "connect_timeout": settings.DB_CONNECT_TIMEOUT,
+        "prepare_threshold": None,  # Required for PgBouncer transaction pooling in psycopg3
     }
 
     try:

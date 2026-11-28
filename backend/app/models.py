@@ -243,3 +243,42 @@ class Alert(Base):
 
     def __repr__(self) -> str:
         return f"<Alert(id={self.id}, patient_id={self.patient_id}, level='{self.alert_level}', status='{self.status}')>"
+
+
+class ClinicianPatientAssignment(Base):
+    """Authoritative Clinician-Patient Assignment table (Phase 3B).
+
+    Tracks active and historical assignments between clinicians and patients.
+    Active assignments have revoked_at IS NULL.
+    """
+
+    __tablename__ = "clinician_patient_assignments"
+
+    id = Column(Integer, Identity(always=True), primary_key=True)
+    clinician_id = Column(String(36), nullable=False, index=True)
+    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="RESTRICT"), nullable=False, index=True)
+    assigned_at = Column(DateTime(timezone=True), server_default=text("CURRENT_TIMESTAMP"), nullable=False)
+    assigned_by = Column(String(36), nullable=False)
+    revoked_at = Column(DateTime(timezone=True), nullable=True)
+    revoked_by = Column(String(36), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "idx_cpa_active_pair",
+            "clinician_id",
+            "patient_id",
+            unique=True,
+            sqlite_where=text("revoked_at IS NULL"),
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+        Index(
+            "idx_cpa_patient_active",
+            "patient_id",
+            sqlite_where=text("revoked_at IS NULL"),
+            postgresql_where=text("revoked_at IS NULL"),
+        ),
+    )
+
+    def __repr__(self) -> str:
+        status = "revoked" if self.revoked_at else "active"
+        return f"<ClinicianPatientAssignment(id={self.id}, clinician_id='{self.clinician_id}', patient_id={self.patient_id}, status='{status}')>"
