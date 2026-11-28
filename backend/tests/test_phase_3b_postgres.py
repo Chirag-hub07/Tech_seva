@@ -17,7 +17,7 @@ from typing import Generator, Optional
 try:
     import psycopg
     from psycopg import sql
-    from psycopg.errors import InsufficientPrivilege, IntegrityError, UniqueViolation, StringDataRightTruncation
+    from psycopg.errors import InsufficientPrivilege, IntegrityError, UniqueViolation, StringDataRightTruncation, InvalidParameterValue
 except ImportError:
     psycopg = None
 
@@ -353,6 +353,28 @@ def setup_test_database():
 
             # 3. Create mock clinical tables in public schema
             cur.execute("""
+                DO $$ BEGIN
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'clinician_patient_assignments') THEN
+                        TRUNCATE TABLE public.clinician_patient_assignments CASCADE;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'audit_events') THEN
+                        TRUNCATE TABLE public.audit_events CASCADE;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'alerts') THEN
+                        TRUNCATE TABLE public.alerts CASCADE;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'predictions') THEN
+                        TRUNCATE TABLE public.predictions CASCADE;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'patients') THEN
+                        TRUNCATE TABLE public.patients CASCADE;
+                    END IF;
+                    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'auth' AND table_name = 'users') THEN
+                        DELETE FROM auth.users;
+                    END IF;
+                END $$;
+            """)
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS public.patients (
                     id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
                     patient_code VARCHAR(32) UNIQUE NOT NULL,
@@ -470,18 +492,29 @@ def test_vector_04_backend_rls_allows_active_read():
 @pytest.mark.skipif(not POSTGRES_AVAILABLE, reason=SKIP_REASON)
 def test_vector_04b_backend_authoritative_active_assignment_query():
     """Vector 04b: exacerbalert_backend role can execute the authoritative active assignment query using idx_cpa_active_pair."""
-    clinician_id = str(uuid.uuid4())
     with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
         with conn.cursor() as cur:
-            # Seed an active assignment as admin/superuser
+            # 0. Clean up previous test artifacts if present
+            cur.execute("DELETE FROM public.patients WHERE patient_code = 'PAT-TEST-04B';")
+            cur.execute("DELETE FROM auth.users WHERE email IN ('doc04b@test.org', 'admin04b@test.org');")
+
+            # 1. Seed patient and valid auth users as superuser/postgres
+            cur.execute("INSERT INTO public.patients (patient_code) VALUES ('PAT-TEST-04B') RETURNING id;")
+            pid = cur.fetchone()[0]
+            cur.execute("INSERT INTO auth.users (email, raw_app_meta_data) VALUES ('doc04b@test.org', '{\"role\": \"clinician\"}'::jsonb) RETURNING id;")
+            clinician_id = cur.fetchone()[0]
+            cur.execute("INSERT INTO auth.users (email, raw_app_meta_data) VALUES ('admin04b@test.org', '{\"role\": \"administrator\"}'::jsonb) RETURNING id;")
+            admin_id = cur.fetchone()[0]
+
+            # 2. Seed an active assignment as admin/superuser
             cur.execute("""
                 INSERT INTO public.clinician_patient_assignments (clinician_id, patient_id, assigned_by)
-                VALUES (%s, 1, '550e8400-e29b-41d4-a716-446655440002')
+                VALUES (%s, %s, %s)
                 RETURNING id;
-            """, (clinician_id,))
+            """, (clinician_id, pid, admin_id))
             cpa_id = cur.fetchone()[0]
 
-            # Switch to backend role
+            # 3. Switch to backend role
             cur.execute("SET ROLE exacerbalert_backend;")
             # Test parameterized active assignment query
             cur.execute("""
@@ -490,19 +523,19 @@ def test_vector_04b_backend_authoritative_active_assignment_query():
                   AND patient_id = %s
                   AND revoked_at IS NULL
                 LIMIT 1;
-            """, (clinician_id, 1))
+            """, (clinician_id, pid))
             row = cur.fetchone()
             assert row is not None and row[0] == 1
 
-            # Revoke assignment
+            # 4. Revoke assignment as superuser/admin
             cur.execute("RESET ROLE;")
             cur.execute("""
                 UPDATE public.clinician_patient_assignments
-                SET revoked_at = clock_timestamp(), revoked_by = '550e8400-e29b-41d4-a716-446655440002'
+                SET revoked_at = clock_timestamp(), revoked_by = %s
                 WHERE id = %s;
-            """, (cpa_id,))
+            """, (admin_id, cpa_id))
 
-            # Backend role executes active query again: must return 0 rows
+            # 5. Backend role executes active query again: must return 0 rows
             cur.execute("SET ROLE exacerbalert_backend;")
             cur.execute("""
                 SELECT 1 FROM public.clinician_patient_assignments
@@ -510,23 +543,49 @@ def test_vector_04b_backend_authoritative_active_assignment_query():
                   AND patient_id = %s
                   AND revoked_at IS NULL
                 LIMIT 1;
-            """, (clinician_id, 1))
+            """, (clinician_id, pid))
             assert cur.fetchone() is None
+
+            # Teardown
+            cur.execute("RESET ROLE;")
+            cur.execute("DELETE FROM public.clinician_patient_assignments WHERE id = %s;", (cpa_id,))
+            cur.execute("DELETE FROM public.patients WHERE id = %s;", (pid,))
+            cur.execute("DELETE FROM auth.users WHERE id IN (%s, %s);", (clinician_id, admin_id))
 
 
 @pytest.mark.skipif(not POSTGRES_AVAILABLE, reason=SKIP_REASON)
 def test_vector_05_backend_rls_allows_append_audit():
-    """Vector 05: Backend RLS policy permits INSERT on audit_events."""
+    """Vector 05: Backend RLS policy permits INSERT on audit_events while enforcing foreign key constraints."""
     with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
         with conn.cursor() as cur:
+            # 0. Clean up previous test artifacts if present
+            cur.execute("DELETE FROM auth.users WHERE email = 'actor05@test.org';")
+
+            # 1. Seed valid actor in auth.users as superuser/postgres to satisfy audit_events_actor_id_fkey
+            cur.execute("""
+                INSERT INTO auth.users (email, raw_app_meta_data)
+                VALUES ('actor05@test.org', '{\"role\": \"administrator\"}'::jsonb)
+                RETURNING id;
+            """)
+            actor_id = cur.fetchone()[0]
+
+            # 2. Switch to exacerbalert_backend and verify append-only INSERT succeeds
             cur.execute("SET ROLE exacerbalert_backend;")
             cur.execute("""
                 INSERT INTO public.audit_events (
                     event_type, actor_id, actor_email, actor_role, target_type, target_id, action
                 ) VALUES (
-                    'USER_ROLE_UPDATED', gen_random_uuid(), 'admin@test.org', 'administrator', 'USER', 'u1', 'SET_ROLE'
-                );
-            """)
+                    'USER_ROLE_UPDATED', %s, 'actor05@test.org', 'administrator', 'USER', 'u1', 'SET_ROLE'
+                )
+                RETURNING id;
+            """, (actor_id,))
+            audit_id = cur.fetchone()[0]
+            assert audit_id is not None
+
+            # Teardown
+            cur.execute("RESET ROLE;")
+            cur.execute("DELETE FROM public.audit_events WHERE id = %s;", (audit_id,))
+            cur.execute("DELETE FROM auth.users WHERE id = %s;", (actor_id,))
 
 
 @pytest.mark.skipif(not POSTGRES_AVAILABLE, reason=SKIP_REASON)
@@ -721,13 +780,15 @@ def test_vector_16_get_auth_user_status_returns_6_columns():
     """
     with psycopg.connect(TEST_DB_URL, autocommit=True) as conn:
         with conn.cursor() as cur:
+            # 0. Clean up any existing records from previous test iterations
+            cur.execute("DELETE FROM auth.users WHERE email IN ('admin16@test.org', 'demoted16@test.org', 'banned16@test.org', 'deleted16@test.org');")
+
             # 1. Seed accounts as superuser/postgres
             # User A: Active unchanged administrator (with spoof attempt in raw_user_meta_data)
             cur.execute("""
-                INSERT INTO auth.users (email, role, raw_user_meta_data, raw_app_meta_data)
+                INSERT INTO auth.users (email, raw_user_meta_data, raw_app_meta_data)
                 VALUES (
                     'admin16@test.org',
-                    'authenticated',
                     '{"role": "attacker_spoofed_role"}'::jsonb,
                     '{"role": "administrator", "permissions": ["manage_users"]}'::jsonb
                 )
@@ -737,10 +798,9 @@ def test_vector_16_get_auth_user_status_returns_6_columns():
 
             # User B: Demoted administrator (raw_app_meta_data demoted to clinician)
             cur.execute("""
-                INSERT INTO auth.users (email, role, raw_app_meta_data)
+                INSERT INTO auth.users (email, raw_app_meta_data)
                 VALUES (
                     'demoted16@test.org',
-                    'authenticated',
                     '{"role": "clinician", "permissions": ["read_patients"]}'::jsonb
                 )
                 RETURNING id;
@@ -749,10 +809,9 @@ def test_vector_16_get_auth_user_status_returns_6_columns():
 
             # User C: Banned user (banned_until in future)
             cur.execute("""
-                INSERT INTO auth.users (email, role, banned_until, raw_app_meta_data)
+                INSERT INTO auth.users (email, banned_until, raw_app_meta_data)
                 VALUES (
                     'banned16@test.org',
-                    'authenticated',
                     now() + INTERVAL '1 day',
                     '{"role": "clinician"}'::jsonb
                 )
@@ -762,10 +821,9 @@ def test_vector_16_get_auth_user_status_returns_6_columns():
 
             # User D: Deleted user (deleted_at set)
             cur.execute("""
-                INSERT INTO auth.users (email, role, deleted_at, raw_app_meta_data)
+                INSERT INTO auth.users (email, deleted_at, raw_app_meta_data)
                 VALUES (
                     'deleted16@test.org',
-                    'authenticated',
                     now(),
                     '{"role": "clinician"}'::jsonb
                 )
@@ -825,6 +883,10 @@ def test_vector_16_get_auth_user_status_returns_6_columns():
             row_deleted = cur.fetchone()
             assert row_deleted is not None
             assert row_deleted[5] is not None
+
+            # Teardown: Clean up seeded records
+            cur.execute("SET ROLE postgres;")
+            cur.execute("DELETE FROM auth.users WHERE email IN ('admin16@test.org', 'demoted16@test.org', 'banned16@test.org', 'deleted16@test.org');")
 
 
 @pytest.mark.skipif(not POSTGRES_AVAILABLE, reason=SKIP_REASON)
@@ -1324,6 +1386,59 @@ def test_vector_28_rollback_on_failure():
             assert final_count == initial_count, "Audit event must roll back on failure"
 
 
+def parse_pg_acl_item(item: str) -> tuple[str, str, str]:
+    """Parse a PostgreSQL aclitem string formatted as 'grantee=privileges/grantor'.
+
+    In PostgreSQL:
+    - If the grantee portion before '=' is empty (e.g. '=X/postgres'), it denotes PUBLIC.
+    - If the grantee portion is non-empty (e.g. 'postgres=X/postgres' or 'exacerbalert_backend=X/postgres'),
+      it represents that specific role.
+    Returns: (grantee, privileges, grantor)
+    """
+    item = item.strip()
+    if not item or "=" not in item:
+        return ("", "", "")
+    grantee_part, rest = item.split("=", 1)
+    grantee = grantee_part.strip()
+    if "/" in rest:
+        privs, grantor = rest.split("/", 1)
+    else:
+        privs, grantor = rest, ""
+    normalized_grantee = "PUBLIC" if grantee == "" else grantee
+    return (normalized_grantee, privs, grantor)
+
+
+def test_vector_29_acl_item_parser_unit():
+    """Unit test: Verify that parse_pg_acl_item accurately distinguishes owner, PUBLIC, explicit named roles, anon, and authenticated."""
+    # 1. PUBLIC grant has empty string before '='
+    grantee, privs, grantor = parse_pg_acl_item("=X/postgres")
+    assert grantee == "PUBLIC"
+    assert privs == "X"
+    assert grantor == "postgres"
+
+    # 2. Owner grant has owner role before '=' and is distinguished from PUBLIC
+    grantee, privs, grantor = parse_pg_acl_item("postgres=X/postgres")
+    assert grantee == "postgres"
+    assert grantee != "PUBLIC"
+    assert privs == "X"
+    assert grantor == "postgres"
+
+    # 3. Explicitly granted named roles are identified correctly
+    grantee, privs, grantor = parse_pg_acl_item("exacerbalert_backend=X/postgres")
+    assert grantee == "exacerbalert_backend"
+    assert privs == "X"
+    assert grantor == "postgres"
+
+    # 4. anon and authenticated roles are identified correctly for policy enforcement
+    grantee, privs, grantor = parse_pg_acl_item("anon=r/postgres")
+    assert grantee == "anon"
+    assert privs == "r"
+
+    grantee, privs, grantor = parse_pg_acl_item("authenticated=r/postgres")
+    assert grantee == "authenticated"
+    assert privs == "r"
+
+
 @pytest.mark.skipif(not POSTGRES_AVAILABLE, reason=SKIP_REASON)
 def test_vector_29_default_acls_inspected_and_enforced():
     """Vector 29: Verify pg_default_acl contains no unintended grants for postgres and test enforcement on newly created objects."""
@@ -1341,11 +1456,31 @@ def test_vector_29_default_acls_inspected_and_enforced():
             """)
             rows = cur.fetchall()
             for owner_role, scope, obj_type, acl_entry in rows:
-                assert "anon=" not in acl_entry, f"Found unintended default grant to anon in {scope} for {owner_role} {obj_type}"
-                assert "authenticated=" not in acl_entry, f"Found unintended default grant to authenticated in {scope} for {owner_role} {obj_type}"
-                if obj_type == 'f':
-                    # Routines must not grant EXECUTE to PUBLIC
-                    assert "=X/" not in acl_entry and "PUBLIC=" not in acl_entry, f"Found unintended PUBLIC execute grant in {scope} for {owner_role}"
+                if not acl_entry:
+                    continue
+                # Parse individual aclitem entries: grantee=privileges/grantor
+                for item in acl_entry.split(','):
+                    if not item.strip():
+                        continue
+                    grantee, privs, grantor = parse_pg_acl_item(item)
+
+                    # 1. Neither anon nor authenticated may hold default privileges
+                    assert grantee != "anon", f"Found unintended default grant to anon in {scope} for {owner_role} {obj_type}: {item}"
+                    assert grantee != "authenticated", f"Found unintended default grant to authenticated in {scope} for {owner_role} {obj_type}: {item}"
+
+                    # 2. Distinguish PUBLIC (empty grantee string or 'PUBLIC') from the owner (e.g. 'postgres')
+                    # In PostgreSQL aclitem syntax, '=X/owner' represents a grant to PUBLIC, whereas 'postgres=X/postgres'
+                    # represents the owner's own legitimate privilege.
+                    if obj_type == 'f':
+                        if grantee == "PUBLIC":
+                            assert "X" not in privs, f"Found unintended PUBLIC execute grant in {scope} for {owner_role}: {item}"
+                        elif grantee == owner_role:
+                            # Verify owner retains their own expected privileges
+                            assert "X" in privs, f"Owner {owner_role} should retain routine execution: {item}"
+                            assert grantee != "PUBLIC", "Owner grantee must not be conflated with PUBLIC"
+                        else:
+                            # Explicitly granted named roles are identified correctly
+                            assert len(grantee) > 0, f"Grantee identifier must be non-empty: {item}"
 
             # 2. Live Enforcement Test: Create test table, sequence, and routine in schema public
             cur.execute("DROP TABLE IF EXISTS public.test_vec29_table;")
@@ -1359,21 +1494,60 @@ def test_vector_29_default_acls_inspected_and_enforced():
             # Inspect effective ACLs on the newly created table
             cur.execute("SELECT array_to_string(relacl, ',') FROM pg_class WHERE relname = 'test_vec29_table' AND relnamespace = 'public'::regnamespace;")
             table_acl = cur.fetchone()[0] or ""
-            assert "anon=" not in table_acl, f"New table inherited unintended grant to anon: {table_acl}"
-            assert "authenticated=" not in table_acl, f"New table inherited unintended grant to authenticated: {table_acl}"
+            if table_acl:
+                for item in table_acl.split(','):
+                    if item.strip():
+                        grantee, privs, _ = parse_pg_acl_item(item)
+                        assert grantee != "anon", f"New table inherited unintended grant to anon: {table_acl}"
+                        assert grantee != "authenticated", f"New table inherited unintended grant to authenticated: {table_acl}"
 
             # Inspect effective ACLs on the newly created sequence
             cur.execute("SELECT array_to_string(relacl, ',') FROM pg_class WHERE relname = 'test_vec29_seq' AND relnamespace = 'public'::regnamespace;")
             seq_acl = cur.fetchone()[0] or ""
-            assert "anon=" not in seq_acl, f"New sequence inherited unintended grant to anon: {seq_acl}"
-            assert "authenticated=" not in seq_acl, f"New sequence inherited unintended grant to authenticated: {seq_acl}"
+            if seq_acl:
+                for item in seq_acl.split(','):
+                    if item.strip():
+                        grantee, privs, _ = parse_pg_acl_item(item)
+                        assert grantee != "anon", f"New sequence inherited unintended grant to anon: {seq_acl}"
+                        assert grantee != "authenticated", f"New sequence inherited unintended grant to authenticated: {seq_acl}"
 
             # Inspect effective ACLs on the newly created function
             cur.execute("SELECT array_to_string(proacl, ',') FROM pg_proc WHERE proname = 'test_vec29_func' AND pronamespace = 'public'::regnamespace;")
             func_acl = cur.fetchone()[0] or ""
-            assert "anon=" not in func_acl, f"New function inherited unintended grant to anon: {func_acl}"
-            assert "authenticated=" not in func_acl, f"New function inherited unintended grant to authenticated: {func_acl}"
-            assert "=X/" not in func_acl and "PUBLIC=" not in func_acl, f"New function inherited PUBLIC execute: {func_acl}"
+            if func_acl:
+                for item in func_acl.split(','):
+                    if item.strip():
+                        grantee, privs, _ = parse_pg_acl_item(item)
+                        assert grantee != "anon", f"New function inherited unintended grant to anon: {func_acl}"
+                        assert grantee != "authenticated", f"New function inherited unintended grant to authenticated: {func_acl}"
+                        if grantee == "PUBLIC":
+                            assert "X" not in privs, f"New function inherited PUBLIC execute: {func_acl}"
+                        elif grantee == "postgres":
+                            assert "X" in privs, f"Owner postgres must retain execute: {func_acl}"
+
+            # 3. Explicit named role grant verification:
+            # Grant EXECUTE strictly to the dedicated backend role and verify parser & privileges
+            cur.execute("GRANT EXECUTE ON FUNCTION public.test_vec29_func() TO exacerbalert_backend;")
+            cur.execute("SELECT array_to_string(proacl, ',') FROM pg_proc WHERE proname = 'test_vec29_func' AND pronamespace = 'public'::regnamespace;")
+            func_acl_after_grant = cur.fetchone()[0] or ""
+            grantees_found = {}
+            for item in func_acl_after_grant.split(','):
+                if item.strip():
+                    g, p, _ = parse_pg_acl_item(item)
+                    grantees_found[g] = p
+
+            # Explicitly granted named roles are identified correctly
+            assert "exacerbalert_backend" in grantees_found, f"Explicit named role exacerbalert_backend must be identified: {func_acl_after_grant}"
+            assert "X" in grantees_found["exacerbalert_backend"], "exacerbalert_backend must hold execute privilege"
+
+            # Owner EXECUTE privilege is distinguished from PUBLIC
+            assert "postgres" in grantees_found, "Owner postgres must be distinguished and identified"
+            assert "X" in grantees_found["postgres"], "Owner postgres must retain execute privilege"
+            assert "PUBLIC" not in grantees_found or "X" not in grantees_found.get("PUBLIC", ""), "PUBLIC must NOT hold execute privilege"
+
+            # anon and authenticated do not receive unintended default privileges
+            assert "anon" not in grantees_found, f"anon must not receive privileges: {func_acl_after_grant}"
+            assert "authenticated" not in grantees_found, f"authenticated must not receive privileges: {func_acl_after_grant}"
 
             # Cleanup
             cur.execute("DROP TABLE public.test_vec29_table;")
@@ -1516,6 +1690,10 @@ def test_vector_31_native_base64url_decode_compatibility(phase_3c_prototype_base
             cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8gd29ybGQ');")
             assert bytes(cur.fetchone()[0]) == b"hello world"
 
+            # 1b. Successful decoder test: Input 'aGVsbG8' -> expected decoded bytes: b'hello'
+            cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8');")
+            assert bytes(cur.fetchone()[0]) == b"hello"
+
             # 2. Modulo 2 (needs '==')
             cur.execute("SELECT auth_internal.base64url_decode('aQ');")
             assert bytes(cur.fetchone()[0]) == b"i"
@@ -1528,28 +1706,45 @@ def test_vector_31_native_base64url_decode_compatibility(phase_3c_prototype_base
             cur.execute("SELECT auth_internal.base64url_decode('-_8');")
             assert bytes(cur.fetchone()[0]) == b"\xfb\xff"
 
-            # 5. Invalid character rejection ('+', '/', and '=' should be rejected before translation)
-            with pytest.raises(psycopg.errors.DataException) as exc:
+            # 5. Invalid character rejection ('+', '/', '=', and symbols must be rejected)
+            # 5a. Rejection of standard Base64 '+' character
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
                 cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8+');")
-            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value) or exc.value.sqlstate == "22023"
+            assert exc.value.sqlstate == "22023"
+            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value)
 
-            # 5b. Rejection of '=' padding (strict unpadded Base64URL contract)
-            with pytest.raises(psycopg.errors.DataException) as exc:
+            # 5b. Rejection of standard Base64 '/' character
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
+                cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8/');")
+            assert exc.value.sqlstate == "22023"
+            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value)
+
+            # 5c. Rejection of '=' padding (strict unpadded Base64URL contract)
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
                 cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8=');")
-            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value) or exc.value.sqlstate == "22023"
+            assert exc.value.sqlstate == "22023"
+            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value)
 
-            # 5c. Valid 43-character unpadded Base64URL string produces exact 32-byte digest
+            # 5d. Rejection of non-alphanumeric symbol
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
+                cur.execute("SELECT auth_internal.base64url_decode('aGVsbG8@');")
+            assert exc.value.sqlstate == "22023"
+            assert "INVALID_BASE64URL_CHARACTERS" in str(exc.value)
+
+            # 5e. Valid 43-character unpadded Base64URL string produces exact 32-byte digest
             valid_sig_43 = "b3e6d8a41234456789abcdef0123456789abcdef012"
             cur.execute("SELECT length(auth_internal.base64url_decode(%s));", (valid_sig_43,))
             assert cur.fetchone()[0] == 32
 
             # 6. Invalid modulo 1 length rejection
-            with pytest.raises(psycopg.errors.DataException) as exc:
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
                 cur.execute("SELECT auth_internal.base64url_decode('a');")
-            assert "INVALID_BASE64URL_LENGTH" in str(exc.value) or exc.value.sqlstate == "22023"
+            assert exc.value.sqlstate == "22023"
+            assert "INVALID_BASE64URL_LENGTH" in str(exc.value)
 
             # 7. Input length limit rejection (> 8192 characters)
             long_input = "a" * 8196
-            with pytest.raises(psycopg.errors.DataException) as exc:
+            with pytest.raises(psycopg.errors.InvalidParameterValue) as exc:
                 cur.execute("SELECT auth_internal.base64url_decode(%s);", (long_input,))
-            assert "BASE64URL_OVERFLOW" in str(exc.value) or exc.value.sqlstate == "22023"
+            assert exc.value.sqlstate == "22023"
+            assert "BASE64URL_OVERFLOW" in str(exc.value)

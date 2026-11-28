@@ -37,7 +37,7 @@ BEGIN
         u.id,
         u.email::VARCHAR,
         (u.raw_app_meta_data->>'role')::VARCHAR AS role,
-        pg_catalog.coalesce(u.raw_app_meta_data->'permissions', '[]'::jsonb) AS permissions,
+        coalesce(u.raw_app_meta_data->'permissions', '[]'::jsonb) AS permissions,
         u.banned_until,
         u.deleted_at
     FROM auth.users u
